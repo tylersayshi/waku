@@ -518,7 +518,7 @@ export const new_createPages = <
           </Slot>
         </Slot>
       ),
-      [`page:${page.path}`]: page.component,
+      [`page:${page.path}`]: page.component({ children: <Children /> }),
       root: rootItem ? (
         rootItem.component({ children: <Children /> })
       ) : (
