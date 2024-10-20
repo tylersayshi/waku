@@ -3,7 +3,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { default as prompts } from 'prompts';
+import { prompt } from 'enquirer';
 import { red, green, bold } from 'kolorist';
 import fse from 'fs-extra/esm';
 import checkForUpdate from 'update-check';
@@ -87,58 +87,49 @@ async function doPrompts() {
   let targetDir = '';
 
   try {
-    const result = await prompts(
-      [
-        {
-          name: 'projectName',
-          type: 'text',
-          message: 'Project Name',
-          initial: defaultProjectName,
-          onState: (state: any) =>
-            (targetDir = String(state.value).trim() || defaultProjectName),
-        },
-        {
-          name: 'shouldOverwrite',
-          type: () => (canSafelyOverwrite(targetDir) ? null : 'confirm'),
-          message: `${targetDir} is not empty. Remove existing files and continue?`,
-        },
-        {
-          name: 'overwriteChecker',
-          type: (values: any) => {
-            if (values === false) {
-              throw new Error(red('✖') + ' Operation cancelled');
-            }
-            return null;
-          },
-        },
-        {
-          name: 'packageName',
-          type: () => (isValidPackageName(targetDir) ? null : 'text'),
-          message: 'Package name',
-          initial: () => toValidPackageName(targetDir),
-          validate: (dir: string) =>
-            isValidPackageName(dir) || 'Invalid package.json name',
-        },
-        {
-          name: 'templateName',
-          type: values['choose'] ? 'select' : null,
-          message: 'Choose a starter template',
-          choices: templateNames.map((name) => ({
-            title: name,
-            value: name,
-          })),
-        },
-      ],
-      {
-        onCancel: () => {
-          throw new Error(red('✖') + ' Operation cancelled');
-        },
-      },
-    );
+    const projectName = await prompt<string>({
+      message: 'Project Name',
+      name: 'projectName',
+      type: 'text',
+      initial: defaultProjectName,
+      format: (name) => (targetDir = name.trim() || defaultProjectName),
+    });
+    const shouldOverwrite =
+      canSafelyOverwrite(targetDir) ||
+      (await prompt<boolean>({
+        type: 'confirm',
+        name: 'shouldOverwrite',
+        message: `A project with the name ${bold(projectName)} already exists. Do you want to overwrite it?`,
+      }));
+    if (!shouldOverwrite) {
+      throw new Error(red('✖') + ' Operation cancelled');
+    }
+    const packageName =
+      isValidPackageName(targetDir) ||
+      (await prompt<string>({
+        message: 'Package name',
+        type: 'text',
+        name: 'packageName',
+        initial: toValidPackageName(projectName),
+        validate: (dir) =>
+          isValidPackageName(dir) || 'Invalid package.json name',
+      }));
+    const templateName =
+      !values['choose'] ||
+      (await prompt<string>({
+        name: 'templateName',
+        type: 'select',
+        message: 'Choose a starter template',
+        choices: templateNames.map((name) => ({
+          name,
+        })),
+      }));
     return {
-      ...result,
-      packageName: result.packageName ?? toValidPackageName(targetDir),
-      templateName: result.templateName ?? templateNames[0],
+      projectName,
+      shouldOverwrite,
+      packageName:
+        packageName === true ? toValidPackageName(targetDir) : packageName,
+      templateName: templateName === true ? templateNames[0] : templateName,
       targetDir,
     };
   } catch (err) {
@@ -194,7 +185,7 @@ async function init() {
   if (exampleOption) {
     // If an example repository is provided, clone it.
     await downloadAndExtract(root, exampleOption);
-  } else {
+  } else if (templateName) {
     // If an example repository is not provided for cloning, proceed
     // by installing from a template.
     await installTemplate(root, packageName, templateRoot, templateName);
